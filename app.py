@@ -6,7 +6,11 @@ from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+
+# Importações corrigidas para versões recentes do LangChain
+from langchain.chains.history_aware_retriever import create_history_aware_retriever
+from langchain.chains.retrieval import create_retrieval_chain
+
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
@@ -98,100 +102,3 @@ with st.sidebar:
                             azure_endpoint=azure_endpoint,
                             api_key=azure_api_key,
                             api_version=azure_api_version
-                        )
-                        vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
-                        retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-
-                        # Prompt de Contextualização do Histórico
-                        contextualize_q_system_prompt = (
-                            "Dada uma conversa recente e a última pergunta do usuário, "
-                            "formule uma pergunta independente que possa ser entendida sem o histórico."
-                        )
-                        contextualize_q_prompt = ChatPromptTemplate.from_messages([
-                            ("system", contextualize_q_system_prompt),
-                            MessagesPlaceholder("chat_history"),
-                            ("human", "{input}"),
-                        ])
-                        history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-
-                        # Prompt de Resposta Principal com RAG + Persona
-                        qa_system_prompt = (
-                            f"{system_persona}\n\n"
-                            "Utilize os seguintes trechos de contexto recuperados para responder à pergunta. "
-                            "Se não souber a resposta com base no contexto, informe claramente.\n\n"
-                            "Contexto:\n{{context}}"
-                        )
-                        qa_prompt = ChatPromptTemplate.from_messages([
-                            ("system", qa_system_prompt),
-                            MessagesPlaceholder("chat_history"),
-                            ("human", "{input}"),
-                        ])
-                        
-                        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-                        st.session_state.rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-                    else:
-                        # Modo sem RAG vetorial (Chat direto com Persona)
-                        prompt = ChatPromptTemplate.from_messages([
-                            ("system", system_persona),
-                            MessagesPlaceholder("chat_history"),
-                            ("human", "{input}"),
-                        ])
-                        st.session_state.rag_chain = prompt | llm
-
-                    st.session_state.connected = True
-                    st.success("Conexão estabelecida com sucesso!")
-
-                except Exception as e:
-                    st.error(f"Erro ao conectar com Azure OpenAI: {str(e)}")
-
-# --- ÁREA PRINCIPAL DO CHAT ---
-
-# Cabeçalho de Ações da Sessão
-col_title, col_reset = st.columns([4, 1])
-with col_reset:
-    if st.button("🔄 Novo Chat", use_container_width=True):
-        st.session_state.chat_history = []
-        st.rerun()
-
-# Exibição das mensagens anteriores
-for message in st.session_state.chat_history:
-    if isinstance(message, HumanMessage):
-        with st.chat_message("user"):
-            st.markdown(message.content)
-    elif isinstance(message, AIMessage):
-        with st.chat_message("assistant"):
-            st.markdown(message.content)
-
-# Campo de entrada de texto
-user_input = st.chat_input("Digite sua dúvida técnica ou solicitação sobre a obra...")
-
-if user_input:
-    if not st.session_state.connected or st.session_state.rag_chain is None:
-        st.warning("⚠️ Insira as credenciais da Azure na barra lateral e clique em 'Iniciar / Atualizar Sessão' antes de conversar.")
-    else:
-        # Exibe mensagem do usuário
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        # Processa e exibe resposta da IA
-        with st.chat_message("assistant"):
-            with st.spinner("Analisando solicitação..."):
-                try:
-                    if isinstance(st.session_state.rag_chain, dict) or hasattr(st.session_state.rag_chain, "invoke"):
-                        # Verifica se é uma cadeia RAG (retorna dict com 'answer') ou Chain simples
-                        response = st.session_state.rag_chain.invoke({
-                            "input": user_input,
-                            "chat_history": st.session_state.chat_history
-                        })
-                        
-                        answer = response["answer"] if isinstance(response, dict) and "answer" in response else response.content
-                    
-                    st.markdown(answer)
-
-                    # Atualiza histórico na sessão
-                    st.session_state.chat_history.append(HumanMessage(content=user_input))
-                    st.session_state.chat_history.append(AIMessage(content=answer))
-
-                except Exception as e:
-                    st.error(f"Erro ao processar resposta: {str(e)}")
