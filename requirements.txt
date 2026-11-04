@@ -1,0 +1,1 @@
+pip install streamlit langchain-openai langchain-community pypdf pandas faiss-cpu tiktoken
